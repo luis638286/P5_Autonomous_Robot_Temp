@@ -76,8 +76,6 @@ def telemetry():
     latest_data = data
     return jsonify({"status": "success", "message": "Data received"}), 201
 
-
-
 @app.route('/telemetry/latest', methods=['GET'])
 def latest_telemetry():
     global latest_data
