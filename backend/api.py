@@ -42,7 +42,7 @@ def require_api_key():
 def is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
-def validate_telemetry(data):
+def validate_telemetry(data):   #validate incoming telemetry data
     if not isinstance(data, dict):
         return False, "Body must be a JSON object"
 
