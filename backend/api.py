@@ -46,12 +46,22 @@ def validate_telemetry(data):
     if not isinstance(data, dict):
         return False, "Body must be a JSON object"
 
+    allowed_top = {"temperature", "position"}
+    extra_top = set(data.keys()) - allowed_top
+    if extra_top:
+        return False, "Unexpected fields: " + ", ".join(sorted(extra_top))
+
     if "temperature" not in data or not is_number(data["temperature"]):
         return False, "temperature must be a number"
 
     pos = data.get("position")
     if not isinstance(pos, dict):
         return False, "position must be an object"
+
+    allowed_pos = {"x", "y"}
+    extra_pos = set(pos.keys()) - allowed_pos
+    if extra_pos:
+        return False, "Unexpected position fields: " + ", ".join(sorted(extra_pos))
 
     if "x" not in pos or "y" not in pos:
         return False, "position must contain x and y"
