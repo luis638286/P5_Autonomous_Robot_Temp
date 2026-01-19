@@ -1,0 +1,11 @@
+{
+  "robot_id": "robot_001",
+  "timestamp": "2025-01-14T10:30:00Z",
+  "position": {
+    "x": 43.2,
+    "y": 12.8
+  },
+  "temperature": 42.5,
+  "battery_percentage": 78,
+  "rotation": 125.0
+}
