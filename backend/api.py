@@ -42,35 +42,6 @@ def require_api_key():
 def is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
-def validate_telemetry(data):   #validate incoming telemetry data
-    if not isinstance(data, dict):
-        return False, "Body must be a JSON object"
-
-    allowed_top = {"temperature", "position"}
-    extra_top = set(data.keys()) - allowed_top
-    if extra_top:
-        return False, "Unexpected fields: " + ", ".join(sorted(extra_top))
-
-    if "temperature" not in data or not is_number(data["temperature"]):
-        return False, "temperature must be a number"
-
-    pos = data.get("position")
-    if not isinstance(pos, dict):
-        return False, "position must be an object"
-
-    allowed_pos = {"x", "y"}
-    extra_pos = set(pos.keys()) - allowed_pos
-    if extra_pos:
-        return False, "Unexpected position fields: " + ", ".join(sorted(extra_pos))
-
-    if "x" not in pos or "y" not in pos:
-        return False, "position must contain x and y"
-
-    if not is_number(pos["x"]) or not is_number(pos["y"]):
-        return False, "position.x and position.y must be numbers"
-
-    return True, ""
-
 @app.route('/telemetry', methods=['POST'])
 def telemetry():
     global latest_data
@@ -79,7 +50,7 @@ def telemetry():
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True)
-    ok, msg = validate_telemetry(data)
+    ok, msg = data
     if not ok:
         return jsonify({"error": msg}), 400
 

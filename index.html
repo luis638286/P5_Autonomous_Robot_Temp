@@ -1,24 +1,649 @@
 <!DOCTYPE html>
-<html>
-<body>
-<p>Temperature: <span id="temperature">--</span></p>
-<p>Position: <span id="position">--</span></p>
-<p>x: <span id="x">--</span></p>
-<p>y: <span id="y">--</span></p>
-
-<script>
-setInterval(async () => {
-    try {
-        const res = await fetch("http://127.0.0.1:5000/telemetry/latest")
-        if (res.ok) {
-            const data = await res.json();
-            document.getElementById('temperature').textContent = data.temperature;
-            document.getElementById('position').textContent = `(${data.position.x}, ${data.position.y})`;
-            document.getElementById('x').textContent = data.position.x; 
-            document.getElementById('y').textContent = data.position.y;
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Room Mapping</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-    } catch (e) {}
-}, 1000);
-</script>
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            min-height: 100vh;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .map-panel {
+            flex: 1;
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .info-panel {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2 {
+            font-size: 18px;
+            color: #555;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+
+        canvas {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: move;
+            width: 100%;
+            display: block;
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .stat:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            font-size: 18px;
+            color: #333;
+        }
+
+        .temp-value {
+            color: #ff6b6b;
+        }
+
+        .humid-value {
+            color: #4ecdc4;
+        }
+
+        .dist-value {
+            color: #95e1d3;
+        }
+
+        .pos-value {
+            color: #667eea;
+            font-size: 14px;
+        }
+
+        .status {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: #667eea;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .hotspot-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            margin-left: 8px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .timestamp {
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="map-panel">
+            <h1>
+                🤖 Room Map
+                <span id="status" class="status disconnected">Disconnected</span>
+            </h1>
+            <canvas id="mapCanvas" width="800" height="600"></canvas>
+            <div class="controls">
+                <button onclick="resetView()">Reset View</button>
+                <button onclick="clearHistory()">Clear History</button>
+                <button onclick="toggleTrail()">Toggle Trail</button>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="card">
+                <h2>📊 Live Telemetry</h2>
+                <div class="stat">
+                    <span class="stat-label">🌡️ Temperature</span>
+                    <span class="stat-value temp-value" id="temperature">--°C</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">💧 Humidity</span>
+                    <span class="stat-value humid-value" id="humidity">--%</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">📏 Distance</span>
+                    <span class="stat-value dist-value" id="distance">-- cm</span>
+                </div>
+                <div class="timestamp" id="lastUpdate">Last update: --</div>
+            </div>
+
+            <div class="card">
+                <h2>📍 Robot Position</h2>
+                <div class="stat">
+                    <span class="stat-label">X Position</span>
+                    <span class="stat-value pos-value" id="posX">-- m</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Y Position</span>
+                    <span class="stat-value pos-value" id="posY">-- m</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Angle</span>
+                    <span class="stat-value pos-value" id="theta">--°</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🎨 Legend</h2>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #667eea;"></div>
+                        <span>Robot</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(102, 126, 234, 0.3);"></div>
+                        <span>Path Trail</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #ff6b6b;"></div>
+                        <span>Hotspot (&gt;28°C)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #4ecdc4;"></div>
+                        <span>Cool Area (&lt;22°C)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #333;"></div>
+                        <span>Detected Walls</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>📈 Statistics</h2>
+                <div class="stat">
+                    <span class="stat-label">Data Points</span>
+                    <span class="stat-value" id="dataPoints">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Hotspots Found</span>
+                    <span class="stat-value temp-value" id="hotspotCount">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Distance Traveled</span>
+                    <span class="stat-value" id="distTraveled">0.00 m</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Configuration
+        const HOTSPOT_THRESHOLD = 28.0;
+        const COOL_THRESHOLD = 22.0;
+        const PIXELS_PER_METER = 100;
+        const API_URL = "https://p5-autonomous-robot-temp.onrender.com/telemetry/latest";
+
+        // State
+        let robotData = null;
+        let pathHistory = [];
+        let wallPoints = [];
+        let hotspots = [];
+        let isConnected = false;
+        let showTrail = true;
+        let totalDistance = 0;
+
+        // Camera/View
+        let offsetX = canvas.width / 2;
+        let offsetY = canvas.height / 2;
+        let scale = 1.0;
+
+        // Convert world coordinates to screen coordinates
+        function worldToScreen(x, y) {
+            return {
+                x: offsetX + x * PIXELS_PER_METER * scale,
+                y: offsetY - y * PIXELS_PER_METER * scale  // Flip Y axis
+            };
+        }
+
+        // Draw grid
+        function drawGrid() {
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 1;
+
+            const gridSize = 0.5; // 0.5 meter grid
+            const screenGridSize = gridSize * PIXELS_PER_METER * scale;
+
+            // Calculate visible range
+            const startX = Math.floor(-offsetX / screenGridSize) * gridSize;
+            const startY = Math.floor(-offsetY / screenGridSize) * gridSize;
+            const endX = Math.ceil((canvas.width - offsetX) / screenGridSize) * gridSize;
+            const endY = Math.ceil((canvas.height - offsetY) / screenGridSize) * gridSize;
+
+            // Vertical lines
+            for (let x = startX; x <= endX; x += gridSize) {
+                const screen = worldToScreen(x, 0);
+                ctx.beginPath();
+                ctx.moveTo(screen.x, 0);
+                ctx.lineTo(screen.x, canvas.height);
+                ctx.stroke();
+            }
+
+            // Horizontal lines
+            for (let y = startY; y <= endY; y += gridSize) {
+                const screen = worldToScreen(0, y);
+                ctx.beginPath();
+                ctx.moveTo(0, screen.y);
+                ctx.lineTo(canvas.width, screen.y);
+                ctx.stroke();
+            }
+
+            // Origin
+            const origin = worldToScreen(0, 0);
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(origin.x - 10, origin.y);
+            ctx.lineTo(origin.x + 10, origin.y);
+            ctx.moveTo(origin.x, origin.y - 10);
+            ctx.lineTo(origin.x, origin.y + 10);
+            ctx.stroke();
+        }
+
+        // Draw path trail
+        function drawPath() {
+            if (!showTrail || pathHistory.length < 2) return;
+
+            for (let i = 1; i < pathHistory.length; i++) {
+                const prev = pathHistory[i - 1];
+                const curr = pathHistory[i];
+
+                const screenPrev = worldToScreen(prev.x, prev.y);
+                const screenCurr = worldToScreen(curr.x, curr.y);
+
+                // Color based on temperature
+                let color;
+                if (curr.temp >= HOTSPOT_THRESHOLD) {
+                    color = 'rgba(255, 107, 107, 0.6)';
+                } else if (curr.temp <= COOL_THRESHOLD) {
+                    color = 'rgba(78, 205, 196, 0.6)';
+                } else {
+                    color = 'rgba(102, 126, 234, 0.4)';
+                }
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3 * scale;
+                ctx.beginPath();
+                ctx.moveTo(screenPrev.x, screenPrev.y);
+                ctx.lineTo(screenCurr.x, screenCurr.y);
+                ctx.stroke();
+            }
+        }
+
+        // Draw hotspot markers
+        function drawHotspots() {
+            hotspots.forEach(spot => {
+                const screen = worldToScreen(spot.x, spot.y);
+                
+                // Pulsing circle
+                const radius = 8 * scale;
+                const gradient = ctx.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, radius);
+                gradient.addColorStop(0, 'rgba(255, 107, 107, 0.8)');
+                gradient.addColorStop(1, 'rgba(255, 107, 107, 0.2)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Temperature label
+                ctx.fillStyle = '#ff6b6b';
+                ctx.font = `bold ${10 * scale}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText(`${spot.temp.toFixed(1)}°C`, screen.x, screen.y - 12 * scale);
+            });
+        }
+
+        // Draw walls
+        function drawWalls() {
+            ctx.fillStyle = 'rgba(50, 50, 50, 0.7)';
+            wallPoints.forEach(wall => {
+                const screen = worldToScreen(wall.x, wall.y);
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, 3 * scale, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // Draw robot
+        function drawRobot(x, y, theta) {
+            const screen = worldToScreen(x, y);
+            const size = 15 * scale;
+
+            // Robot body (circle)
+            ctx.fillStyle = '#667eea';
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Direction indicator (triangle)
+            const thetaRad = theta * Math.PI / 180;
+            const dx = Math.cos(thetaRad) * size * 1.5;
+            const dy = -Math.sin(thetaRad) * size * 1.5;
+
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.moveTo(screen.x + dx, screen.y + dy);
+            ctx.lineTo(screen.x + dx * 0.3 - dy * 0.3, screen.y + dy * 0.3 + dx * 0.3);
+            ctx.lineTo(screen.x + dx * 0.3 + dy * 0.3, screen.y + dy * 0.3 - dx * 0.3);
+            ctx.closePath();
+            ctx.fill();
+
+            // Outline
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2 * scale;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, size, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Render everything
+        function render() {
+            // Clear
+            ctx.fillStyle = '#fafafa';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw components
+            drawGrid();
+            drawWalls();
+            drawPath();
+            drawHotspots();
+
+            if (robotData && robotData.pose) {
+                drawRobot(robotData.pose.x, robotData.pose.y, robotData.pose.theta_deg);
+            }
+        }
+
+        // Fetch latest telemetry
+        async function fetchTelemetry() {
+            try {
+                const res = await fetch(API_URL);
+                if (!res.ok) throw new Error('API error');
+                
+                const data = await res.json();
+                robotData = data;
+                isConnected = true;
+
+                // Update UI
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('temperature').textContent = `${data.temperature?.toFixed(1) || '--'}°C`;
+                document.getElementById('humidity').textContent = `${data.humidity?.toFixed(1) || '--'}%`;
+                document.getElementById('distance').textContent = `${data.distance_cm?.toFixed(1) || '--'} cm`;
+                
+                if (data.pose) {
+                    document.getElementById('posX').textContent = `${data.pose.x.toFixed(3)} m`;
+                    document.getElementById('posY').textContent = `${data.pose.y.toFixed(3)} m`;
+                    document.getElementById('theta').textContent = `${data.pose.theta_deg.toFixed(1)}°`;
+
+                    // Add to path history
+                    const newPoint = {
+                        x: data.pose.x,
+                        y: data.pose.y,
+                        temp: data.temperature || 0,
+                        timestamp: Date.now()
+                    };
+
+                    if (pathHistory.length > 0) {
+                        const last = pathHistory[pathHistory.length - 1];
+                        const dist = Math.sqrt(
+                            Math.pow(newPoint.x - last.x, 2) + 
+                            Math.pow(newPoint.y - last.y, 2)
+                        );
+                        totalDistance += dist;
+                    }
+
+                    pathHistory.push(newPoint);
+
+                    // Detect hotspots
+                    if (data.temperature >= HOTSPOT_THRESHOLD) {
+                        // Check if this is a new hotspot location
+                        const isDuplicate = hotspots.some(h => 
+                            Math.abs(h.x - data.pose.x) < 0.1 && 
+                            Math.abs(h.y - data.pose.y) < 0.1
+                        );
+                        
+                        if (!isDuplicate) {
+                            hotspots.push({
+                                x: data.pose.x,
+                                y: data.pose.y,
+                                temp: data.temperature
+                            });
+                        }
+                    }
+
+                    // Calculate wall position from ultrasonic
+                    if (data.distance_cm > 0 && data.distance_cm < 200) {
+                        const distM = data.distance_cm / 100;
+                        const thetaRad = data.pose.theta_deg * Math.PI / 180;
+                        const wallX = data.pose.x + distM * Math.cos(thetaRad);
+                        const wallY = data.pose.y + distM * Math.sin(thetaRad);
+                        
+                        wallPoints.push({ x: wallX, y: wallY });
+                        
+                        // Limit wall points to prevent memory issues
+                        if (wallPoints.length > 500) {
+                            wallPoints.shift();
+                        }
+                    }
+
+                    // Limit history
+                    if (pathHistory.length > 1000) {
+                        pathHistory.shift();
+                    }
+                }
+
+                // Update stats
+                document.getElementById('dataPoints').textContent = pathHistory.length;
+                document.getElementById('hotspotCount').textContent = hotspots.length;
+                document.getElementById('distTraveled').textContent = totalDistance.toFixed(2) + ' m';
+                document.getElementById('lastUpdate').textContent = 
+                    'Last update: ' + new Date().toLocaleTimeString();
+
+                render();
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                isConnected = false;
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+            }
+        }
+
+        // Control functions
+        function resetView() {
+            offsetX = canvas.width / 2;
+            offsetY = canvas.height / 2;
+            scale = 1.0;
+            render();
+        }
+
+        function clearHistory() {
+            if (confirm('Clear all path history and hotspots?')) {
+                pathHistory = [];
+                wallPoints = [];
+                hotspots = [];
+                totalDistance = 0;
+                render();
+            }
+        }
+
+        function toggleTrail() {
+            showTrail = !showTrail;
+            render();
+        }
+
+        // Mouse pan controls
+        let isDragging = false;
+        let lastX, lastY;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastX = e.offsetX;
+            lastY = e.offsetY;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                offsetX += e.offsetX - lastX;
+                offsetY += e.offsetY - lastY;
+                lastX = e.offsetX;
+                lastY = e.offsetY;
+                render();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        // Zoom with mouse wheel
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            scale *= zoomFactor;
+            scale = Math.max(0.1, Math.min(5, scale));
+            render();
+        });
+
+        // Start polling
+        fetchTelemetry();
+        setInterval(fetchTelemetry, 1000);
+    </script>
 </body>
 </html>
